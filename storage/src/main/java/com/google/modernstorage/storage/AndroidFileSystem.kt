@@ -37,6 +37,13 @@ import java.io.IOException
 import java.util.Locale
 import kotlin.coroutines.resume
 
+/**
+ * 主要针对 SAF 以及私有文件目录下的文件访问
+ * 使用 okio 里的 Path 来统一代表 uri 和 String（File Path），其中通过 [isPhysicalFile] 判断是否是 uri
+ * 
+ * 对于 String（File Path）的情况，感觉不需要自己实现一遍，直接调用 JVM 上的实现就好了，这里应该只需要考虑处理 url 的情况，
+ * 也就是对 DocumentFile 处理的封装
+ */
 class AndroidFileSystem(private val context: Context) : FileSystem() {
     private val contentResolver = context.contentResolver
 
@@ -52,6 +59,7 @@ class AndroidFileSystem(private val context: Context) : FileSystem() {
         if (file.exists()) throw IOException("$this already exists.")
     }
 
+    // 在文件内容末尾追加内容
     override fun appendingSink(file: Path, mustExist: Boolean): Sink {
         if (isPhysicalFile(file)) {
             val target = file.toFile()
@@ -60,11 +68,13 @@ class AndroidFileSystem(private val context: Context) : FileSystem() {
             return target.sink(append = true)
         }
 
+        // SAF 模式下（使用 Uri），必然是要存在的，所以这里的 mustExist 必须要为 true
         if (!mustExist) {
             throw IOException("Appending on an inexisting path isn't supported ($file)")
         }
 
         val uri = file.toUri()
+        // 通过 contentResolver 来获取 openOutputStream，来实现对文件的写入
         val outputStream = contentResolver.openOutputStream(uri, "a")
 
         if (outputStream == null) {
@@ -82,6 +92,7 @@ class AndroidFileSystem(private val context: Context) : FileSystem() {
     }
 
     override fun canonicalize(path: Path): Path {
+        // 这里不太严谨，应该是 uri 模式下不支持这个 API，如果是 file 模式的话，是可以支持的
         throw UnsupportedOperationException("Paths can't be canonicalized in AndroidFileSystem")
     }
 
@@ -96,6 +107,7 @@ class AndroidFileSystem(private val context: Context) : FileSystem() {
         throw UnsupportedOperationException("Symlinks  can't be created in AndroidFileSystem")
     }
 
+    // mustExist 这个参数没有用到，这里应该参考下 JVM 的默认实现
     override fun delete(path: Path, mustExist: Boolean) {
         if (isPhysicalFile(path)) {
             val file = path.toFile()
@@ -148,6 +160,7 @@ class AndroidFileSystem(private val context: Context) : FileSystem() {
         val documentId = DocumentsContract.getDocumentId(rootUri)
         val treeUri = DocumentsContract.buildChildDocumentsUriUsingTree(rootUri, documentId)
 
+        // 查询 document uri 是查询哪个表呢？
         val cursor = contentResolver.query(
             treeUri,
             arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID),
